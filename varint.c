@@ -32,9 +32,11 @@ varint_t *int64_to_varint(const int64_t in) {
   return out;
 }
 
-varint_t *varint_from_buf(const char *buf) {
+varint_t *varint_from_buf(const char *buf, const ssize_t len) {
   uint8_t counter = 0;
-  while (((*(buf + counter)) & 0x80) && (counter < 10)) counter++;
+  while (((*(buf + counter)) & 0x80) &&
+         (counter < (len - 1 < 10 ? len - 1 : 10)))
+    counter++;
   varint_t *out = calloc(2 + counter, sizeof(uint8_t));
   if (!out) {
     L_PERROR();

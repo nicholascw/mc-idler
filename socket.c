@@ -18,8 +18,6 @@
 
 #include "log.h"
 
-#define EPOLL_ERRS (EPOLLRDHUP | EPOLLERR | EPOLLHUP)
-
 static void *_socket_get_in_addr(struct sockaddr *sa) {
   if (sa->sa_family == AF_INET) {
     return &(((struct sockaddr_in *)sa)->sin_addr);
@@ -78,7 +76,7 @@ int socket_epoll_listen(char *hostname, char *port) {
   return listen_fd;
 }
 
-void socket_epoll_loop(int listen_fd, void (*fsm)(conn_info_t *)) {
+void socket_epoll_loop(int listen_fd, void (*fsm)(conn_info_t *, int)) {
   socklen_t sin_size;
   char s[INET6_ADDRSTRLEN];
   int new_fd;
@@ -132,17 +130,25 @@ void socket_epoll_loop(int listen_fd, void (*fsm)(conn_info_t *)) {
           conn_info_t *new_conn = calloc(1, sizeof(conn_info_t));
           if (!new_conn) {
             L_PERROR();
-            L_ERRF("failed to allocate space for fd=%d, closing socket...",
-                   new_fd);
+            L_ERRF(
+                "failed to allocate space for fd=%d, "
+                "closing socket...",
+                new_fd);
             close(new_fd);
           } else {
             ev.data.ptr = new_conn;
             new_conn->connfd = new_fd;
+            new_conn->state = -1;
+            new_conn->target_packet_len = -1;
+            new_conn->current_buf_len = 0;
+            new_conn->buf = NULL;
             ev.events = EPOLLIN | EPOLL_ERRS;
             if (epoll_ctl(epollfd, EPOLL_CTL_ADD, new_fd, &ev) == -1) {
               L_PERROR();
-              L_ERRF("failed to add fd=%d into epoll, closing socket...",
-                     new_fd);
+              L_ERRF(
+                  "Failed to add fd=%d into epoll, "
+                  "closing socket...",
+                  new_fd);
               free(new_conn);
               close(new_fd);
             } else {
@@ -152,92 +158,8 @@ void socket_epoll_loop(int listen_fd, void (*fsm)(conn_info_t *)) {
         } else {
           // existing connection
           conn_info_t *this_conn = events[i].data.ptr;
-          if (events[i].events & EPOLLIN) {
-            if (this_conn->filefd == -1) continue;
-            // read in header
-            int ret = recv(this_evfd, this_conn->buf + this_conn->len,
-                           PIPE_BUF - this_conn->len - 1, 0);
-            if (ret < 0) {
-              if (errno == EAGAIN || errno == EINTR || errno == EWOULDBLOCK)
-                continue;
-              else {
-                L_PERROR();
-                L_ERRF(
-                    "Error when receiving HTTP header from fd=%d, closing...",
-                    this_evfd);
-                free(this_conn);
-                epoll_ctl(epollfd, EPOLL_CTL_DEL, this_evfd, NULL);
-                close(this_evfd);
-                continue;
-              }
-            }
-            this_conn->buf[this_conn->len + ret] = '\0';
-
-            // handle buffer here
-
-            // enable listening for EPOLLOUT event
-            ev.data.ptr = events[i].data.ptr;
-            ev.events = EPOLLOUT | EPOLL_ERRS;
-            if (epoll_ctl(epollfd, EPOLL_CTL_MOD, this_evfd, &ev) == -1) {
-              L_PERROR();
-            }
-          } else if (events[i].events & EPOLLOUT) {
-            // write out file
-            if (this_conn->len > 0) {
-              int send_ret =
-                  send(this_evfd, this_conn->buf,
-                       this_conn->len + this_conn->offset, MSG_DONTWAIT);
-              if (send_ret > 0) {
-                L_DEBUGF("sent fd=%d %d byte(s)", this_evfd, send_ret);
-                if (send_ret < this_conn->len - this_conn->offset) {
-                  this_conn->offset += send_ret;
-                } else {
-                  if (this_conn->filefd > 0) {
-                    // read more file in
-                    int read_ret =
-                        read(this_conn->filefd, this_conn->buf, PIPE_BUF);
-                    if (read_ret > 0) {
-                      L_DEBUGF("read in %d bytes to fd=%d buffer from fd=%d",
-                               read_ret, this_evfd, this_conn->filefd);
-                      this_conn->len = read_ret;
-                      this_conn->offset = 0;
-                    } else if (read_ret == 0) {
-                      // close connection
-                      epoll_ctl(epollfd, EPOLL_CTL_DEL, this_evfd, NULL);
-                      close(this_evfd);
-                      close(this_conn->filefd);
-                      free(this_conn);
-                    } else {
-                      if (errno == EAGAIN || errno == EINTR ||
-                          errno == EWOULDBLOCK)
-                        continue;
-                      else
-                        L_PERROR();
-                    }
-                  } else {
-                    // close connection
-                    L_INFOF("close fd=%d due to eof@fd=%d.", this_evfd,
-                            this_conn->filefd);
-                    epoll_ctl(epollfd, EPOLL_CTL_DEL, this_evfd, NULL);
-                    close(this_evfd);
-                    close(this_conn->filefd);
-                    free(this_conn);
-                  }
-                }
-              } else {
-                if (errno == EAGAIN || errno == EINTR || errno == EWOULDBLOCK)
-                  continue;
-                else
-                  L_PERROR();
-              }
-            } else {
-              // close connection
-              L_INFOF("close fd=%d due to buffer len=0.", this_evfd);
-              epoll_ctl(epollfd, EPOLL_CTL_DEL, this_evfd, NULL);
-              close(this_evfd);
-              close(this_conn->filefd);
-              free(this_conn);
-            }
+          if (events[i].events & (EPOLLIN | EPOLLOUT)) {
+            (*fsm)(this_conn, epollfd);
           } else {
             L_DEBUG("Unknown epoll events returned.");
           }
