@@ -106,7 +106,8 @@ void socket_epoll_loop(int listen_fd, void (*fsm)(conn_info_t *, int)) {
                             ? listen_fd
                             : ((conn_info_t *)events[i].data.ptr)->connfd;
         if (events[i].events & EPOLL_ERRS) {
-          L_ERRF("Error occured on fd=%d, closing...", this_evfd);
+          L_ERRF("Epoll error event 0x%x occured on fd=%d, closing...",
+                 events[i].events, this_evfd);
           free(events[i].data.ptr);
           close(this_evfd);
           epoll_ctl(epollfd, EPOLL_CTL_DEL, this_evfd, NULL);

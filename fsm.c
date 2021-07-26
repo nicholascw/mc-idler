@@ -6,6 +6,8 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 
+#include "dbg.h"
+#include "dummy_response.h"
 #include "log.h"
 #include "varint.h"
 
@@ -25,6 +27,17 @@ static void _fsm_epollout_enable(conn_info_t *conn, int epollfd) {
     _fsm_epoll_remove(conn, epollfd);
   }
 }
+
+static void _fsm_epollin_enable(conn_info_t *conn, int epollfd) {
+  struct epoll_event ev;
+  ev.events = EPOLLIN | EPOLL_ERRS;
+  ev.data.ptr = conn;
+  if (epoll_ctl(epollfd, EPOLL_CTL_MOD, conn->connfd, &ev) == -1) {
+    L_PERROR();
+    _fsm_epoll_remove(conn, epollfd);
+  }
+}
+
 typedef struct {
   char *buf;
   ssize_t ret;
@@ -48,6 +61,25 @@ static _fsm_buf_ret_t _fsm_recv(conn_info_t *conn, int len, int epollfd,
     _fsm_epoll_remove(conn, epollfd);
   }
   return r;
+}
+
+static uint8_t _fsm_send(conn_info_t *conn) {
+  char *ptr = conn->buf + conn->current_buf_len;
+  int send_ret =
+      send(conn->connfd, ptr, conn->target_packet_len - conn->current_buf_len,
+           MSG_DONTWAIT);
+  if (send_ret <= 0) {
+    if (!(errno == EAGAIN || errno == EINTR || errno == EWOULDBLOCK))
+      L_PERROR();
+    return 0;
+  }
+
+  L_DEBUGF("sent fd=%d %d byte(s)", conn->connfd, send_ret);
+  conn->current_buf_len += send_ret;
+  if (conn->current_buf_len >= conn->target_packet_len)
+    return 1;
+  else
+    return 0;
 }
 
 static uint64_t _fsm_parse_handshake(char *buf, ssize_t buflen) {
@@ -92,71 +124,143 @@ static uint64_t _fsm_parse_handshake(char *buf, ssize_t buflen) {
   return next_state;
 }
 
+static void _fsm_state_waitall(conn_info_t *conn, int epollfd) {
+  L_DEBUG("State -1 entered.");
+  _fsm_buf_ret_t rbuf = _fsm_recv(conn, 5, epollfd, NULL);
+  varint_t *packet_len = varint_from_buf(rbuf.buf, rbuf.ret);
+  if (!packet_len) {
+    L_ERRF("Failed to parse packet length, closing fd=%d", conn->connfd);
+    _fsm_epoll_remove(conn, epollfd);
+  }
+  conn->target_packet_len = varint_to_int64(packet_len);
+  conn->current_buf_len = rbuf.ret - packet_len->len;
+  conn->buf = malloc(conn->target_packet_len + 1);
+  if (!conn->buf) {
+    L_PERROR();
+    L_ERRF("Failed to allocate buffer for incoming packet from fd=%d",
+           conn->connfd);
+    _fsm_epoll_remove(conn, epollfd);
+    free(rbuf.buf);
+    return;
+  }
+  conn->buf[conn->target_packet_len] = '\0';
+  if (rbuf.ret - packet_len->len > 0) {
+    memcpy(conn->buf, rbuf.buf + (packet_len->len), conn->current_buf_len);
+  }
+  free(rbuf.buf);
+  free(packet_len);
+  conn->state = 0;
+  L_DEBUGF("State -1 => State 0 with target_packet_len=%ld",
+           conn->target_packet_len);
+}
+
+static void _fsm_state_parse_inbound(conn_info_t *conn, int epollfd) {
+  L_DEBUG("State 0 entered.");
+  // receive remaining packet with length specified by packet length parsed
+  _fsm_buf_ret_t rbuf =
+      _fsm_recv(conn, conn->target_packet_len - conn->current_buf_len, epollfd,
+                conn->buf + conn->current_buf_len);
+  if (rbuf.ret < 0) return;
+  conn->current_buf_len += rbuf.ret;
+  if (conn->current_buf_len >= conn->target_packet_len) {
+    // packet id check
+    varint_t *v_pktid = varint_from_buf(conn->buf, conn->current_buf_len);
+    int64_t pktid = varint_to_int64(v_pktid);
+    if (v_pktid) free(v_pktid);
+    switch (pktid) {
+      case 0: {
+        if (conn->target_packet_len == 1) {
+          // empty request, drop directly
+          if (conn->buf) free(conn->buf);
+          conn->state = -1;
+          conn->buf = NULL;
+          conn->target_packet_len = -1;
+          conn->current_buf_len = 0;
+        } else {
+          // check nextstate here
+          L_DEBUGF("Received handshake from fd=%d", conn->connfd);
+          int64_t next_state =
+              _fsm_parse_handshake(conn->buf, conn->current_buf_len);
+          if (next_state != 1 && next_state != 2)
+            _fsm_epoll_remove(conn, epollfd);
+          else {
+            if (conn->buf) free(conn->buf);
+            conn->state = next_state;
+            conn->buf = NULL;
+            conn->target_packet_len = -1;
+            conn->current_buf_len = 0;
+            _fsm_epollout_enable(conn, epollfd);
+          }
+        }
+      } break;
+      case 1: {
+        // respond ping-pong
+        memmove(conn->buf + 1, conn->buf, conn->target_packet_len);
+        conn->buf[0] = conn->target_packet_len;
+        conn->current_buf_len = 0;
+        conn->state = 1;
+        conn->target_packet_len++;
+        _fsm_epollout_enable(conn, epollfd);
+      } break;
+      default: {
+        L_ERRF("Unknown Packet ID received: 0x%02lx", pktid);
+        _fsm_epoll_remove(conn, epollfd);
+      } break;
+    }
+  }
+}
+
+static void _fsm_state_send_status(conn_info_t *conn, int epollfd) {
+  L_DEBUG("State 1 entered.");
+  if (conn->buf == NULL) {
+    // construct send buffer with dummy json response
+    int64_t total_packet_len = strlen(str_dummy_json_response);
+    varint_t *v_str_len = int64_to_varint(total_packet_len);
+    total_packet_len += v_str_len->len + 1;  // 1 is packet id 0x00
+    varint_t *v_packet_len = int64_to_varint(total_packet_len);
+    total_packet_len += v_packet_len->len;
+    conn->buf = malloc(total_packet_len);
+    if (!conn->buf) {
+      L_PERROR();
+      _fsm_epoll_remove(conn, epollfd);
+    }
+    char *ptr = conn->buf;
+    memcpy(ptr, v_packet_len->data, v_packet_len->len);
+    ptr += v_packet_len->len;
+    ptr[0] = 0;
+    ptr++;
+    memcpy(ptr, v_str_len->data, v_str_len->len);
+    ptr += v_str_len->len;
+    memcpy(ptr, str_dummy_json_response, strlen(str_dummy_json_response));
+    conn->target_packet_len = total_packet_len;
+    conn->current_buf_len = 0;
+    free(v_str_len);
+    free(v_packet_len);
+  }
+  if (_fsm_send(conn)) {
+    free(conn->buf);
+    conn->buf = NULL;
+    conn->state = -1;
+    conn->target_packet_len = -1;
+    conn->current_buf_len = 0;
+    _fsm_epollin_enable(conn, epollfd);
+  }
+}
+
 void fsm(conn_info_t *conn, int epollfd) {
   if (!conn) return;
   switch (conn->state) {
     case -1: {
-      _fsm_buf_ret_t rbuf = _fsm_recv(conn, 5, epollfd, NULL);
-      varint_t *packet_len = varint_from_buf(rbuf.buf, rbuf.ret);
-      if (!packet_len) {
-        L_ERRF("Failed to parse packet length, closing fd=%d", conn->connfd);
-        _fsm_epoll_remove(conn, epollfd);
-      }
-      conn->target_packet_len = varint_to_int64(packet_len);
-      conn->current_buf_len = rbuf.ret - packet_len->len;
-      conn->buf = malloc(conn->target_packet_len + 1);
-      if (!conn->buf) {
-        L_PERROR();
-        L_ERRF("Failed to allocate buffer for incoming packet from fd=%d",
-               conn->connfd);
-        _fsm_epoll_remove(conn, epollfd);
-        free(rbuf.buf);
-        return;
-      }
-      conn->buf[conn->target_packet_len] = '\0';
-      if (rbuf.ret - packet_len->len > 0) {
-        memcpy(conn->buf, rbuf.buf + (packet_len->len), conn->current_buf_len);
-      }
-      free(rbuf.buf);
-      conn->state = 0;
+      _fsm_state_waitall(conn, epollfd);
     } break;
     case 0: {
-      _fsm_buf_ret_t rbuf =
-          _fsm_recv(conn, conn->target_packet_len - conn->current_buf_len,
-                    epollfd, conn->buf + conn->current_buf_len);
-      if (rbuf.ret < 1) return;
-      conn->current_buf_len += rbuf.ret;
-      if (conn->current_buf_len >= conn->target_packet_len) {
-        // check nextstate here
-        varint_t *v_pktid = varint_from_buf(conn->buf, conn->current_buf_len);
-        int64_t pktid = varint_to_int64(v_pktid);
-        if (v_pktid) free(v_pktid);
-        switch (pktid) {
-          case 0: {
-            L_DEBUGF("Received handshake from fd=%d", conn->connfd);
-            int64_t next_state =
-                _fsm_parse_handshake(conn->buf, conn->current_buf_len);
-            if (next_state != 1 && next_state != 2)
-              _fsm_epoll_remove(conn, epollfd);
-            else {
-              conn->state = next_state;
-              _fsm_epollout_enable(conn, epollfd);
-            }
-          } break;
-          case 1: {
-          } break;
-          default: {
-            L_ERRF("Unknown Packet ID received: 0x%02lx", pktid);
-            _fsm_epoll_remove(conn, epollfd);
-          } break;
-        }
-      }
+      _fsm_state_parse_inbound(conn, epollfd);
     } break;
     case 1: {
-      // respond server list ping here
-      _fsm_epoll_remove(conn, epollfd);
+      _fsm_state_send_status(conn, epollfd);
     } break;
     case 2: {
+      L_DEBUG("State 2 entered.");
       // handle login request here
       _fsm_epoll_remove(conn, epollfd);
     } break;

@@ -6,7 +6,7 @@ OBJS=$(patsubst %.c, obj/%.o, $(SRC))
 
 .PHONY: all clean
 
-all: clean obj mc_idler format
+all: obj mc_idler format
 
 format:
 	$(foreach n, $(SRC), clang-format -style=google -i $(n); )
