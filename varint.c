@@ -16,20 +16,19 @@ int64_t varint_to_int64(const varint_t *in) {
 varint_t *int64_to_varint(const int64_t in) {
   uint8_t buf[10];
   uint8_t i;
-  for (i = 0; i < 10; i++) {
+  buf[0] = 0x7f & in;
+  for (i = 1; i < 10; i++) {
     buf[i] = 0x7f & (in >> (7 * i));
-    if (!(in >> (7 * i)))
-      break;
-    else
-      buf[i] = 0x80 | buf[i];
+    if (!(in >> (7 * i))) break;
+    buf[i - 1] = 0x80 | buf[i - 1];
   }
-  varint_t *out = malloc(2 + i);
+  varint_t *out = malloc(1 + i);
   if (!out) {
     L_PERROR();
     return NULL;
   }
-  out->len = i + 1;
-  memcpy(out->data, buf, i + 1);
+  out->len = i;
+  memcpy(out->data, buf, i);
   return out;
 }
 

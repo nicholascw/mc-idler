@@ -6,7 +6,6 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 
-#include "dbg.h"
 #include "dummy_response.h"
 #include "log.h"
 #include "varint.h"
@@ -266,85 +265,3 @@ void fsm(conn_info_t *conn, int epollfd) {
     } break;
   }
 }
-
-/*
-  // read in header
-
-  int ret = recv(this_conn->connfd, this_conn->buf + this_conn->len,
-                 PIPE_BUF - this_conn->len - 1, 0);
-  if (ret < 0) {
-    if (errno == EAGAIN || errno == EINTR || errno == EWOULDBLOCK)
-      continue;
-    else {
-      L_PERROR();
-      L_ERRF(
-          "Error when receiving client handshake packet from fd=%d, "
-          "closing...",
-          this_evfd);
-      free(this_conn);
-      epoll_ctl(epollfd, EPOLL_CTL_DEL, this_evfd, NULL);
-      close(this_evfd);
-      continue;
-    }
-  } else if (!ret)
-    break;
-
-  this_conn->buf[this_conn->len + ret] = '\0';
-
-  // enable listening for EPOLLOUT event
-
-  ev.data.ptr = events[i].data.ptr;
-  ev.events = EPOLLOUT | EPOLL_ERRS;
-  if (epoll_ctl(epollfd, EPOLL_CTL_MOD, this_evfd, &ev) == -1) {
-    L_PERROR();
-  }
-
-  // close connection
-  L_INFOF("close fd=%d due to eof@fd=%d.", this_evfd, this_conn->filefd);
-  epoll_ctl(epollfd, EPOLL_CTL_DEL, this_evfd, NULL);
-  close(this_evfd);
-  free(this_conn);
-
-  // write out file
-  if (this_conn->len > 0) {
-    int send_ret = send(this_evfd, this_conn->buf,
-                        this_conn->len + this_conn->offset, MSG_DONTWAIT);
-    if (send_ret > 0) {
-      L_DEBUGF("sent fd=%d %d byte(s)", this_evfd, send_ret);
-      if (send_ret < this_conn->len - this_conn->offset) {
-        this_conn->offset += send_ret;
-      } else {
-        if (this_conn->filefd > 0) {
-          // read more file in
-          int read_ret = read(this_conn->filefd, this_conn->buf, PIPE_BUF);
-          if (read_ret > 0) {
-            L_DEBUGF("read in %d bytes to fd=%d buffer from fd=%d", read_ret,
-                     this_evfd, this_conn->filefd);
-            this_conn->len = read_ret;
-            this_conn->offset = 0;
-          } else if (read_ret == 0) {
-            // close connection
-            epoll_ctl(epollfd, EPOLL_CTL_DEL, this_evfd, NULL);
-            close(this_evfd);
-            close(this_conn->filefd);
-            free(this_conn);
-          } else {
-            if (errno == EAGAIN || errno == EINTR || errno == EWOULDBLOCK)
-              continue;
-            else
-              L_PERROR();
-          }
-        } else {
-        }
-      }
-    } else {
-      if (errno == EAGAIN || errno == EINTR || errno == EWOULDBLOCK)
-        continue;
-      else
-        L_PERROR();
-    }
-  } else {
-  }
-}
-
-*/

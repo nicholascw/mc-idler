@@ -2,7 +2,6 @@
 
 #include "fsm.h"
 #include "socket.h"
-
 int main(int argc, char **argv) {
   int fd;
   if (argc == 3)
