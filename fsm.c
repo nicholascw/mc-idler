@@ -1,15 +1,18 @@
+#include "fsm.h"
+
+#include <arpa/inet.h>
 #include <limits.h>
 #include <string.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 
 #include "log.h"
-#include "socket.h"
 #include "varint.h"
 
 static void _fsm_epoll_remove(conn_info_t *conn, int epollfd) {
   epoll_ctl(epollfd, EPOLL_CTL_DEL, conn->connfd, NULL);
   close(conn->connfd);
+  if (conn->buf) free(conn->buf);
   free(conn);
 }
 
@@ -27,7 +30,8 @@ typedef struct {
   ssize_t ret;
 } _fsm_buf_ret_t;
 
-static _fsm_buf_ret_t _fsm_recv(conn_info_t *conn, int len, int epollfd, char *buf) {
+static _fsm_buf_ret_t _fsm_recv(conn_info_t *conn, int len, int epollfd,
+                                char *buf) {
   _fsm_buf_ret_t r = {.buf = NULL, .ret = -1};
   r.buf = buf ? buf : malloc(len);
   if (!r.buf) {
@@ -44,6 +48,48 @@ static _fsm_buf_ret_t _fsm_recv(conn_info_t *conn, int len, int epollfd, char *b
     _fsm_epoll_remove(conn, epollfd);
   }
   return r;
+}
+
+static uint64_t _fsm_parse_handshake(char *buf, ssize_t buflen) {
+  if (buf[0] != 0) {
+    // packet_id is not handshake
+    return -1;
+  }
+  char *ptr = buf + 1;
+  varint_t *vproto_ver = varint_from_buf(ptr, buflen - 1);
+  int64_t proto_ver = varint_to_int64(vproto_ver);
+  L_DEBUGF("Protocol Version Number: %ld", proto_ver);
+  ptr += vproto_ver->len;
+  if (vproto_ver) free(vproto_ver);
+  if (proto_ver == -1) return -1;
+  varint_t *vhost_len = varint_from_buf(ptr, buflen - (ptr - buf));
+  int64_t host_len = varint_to_int64(vhost_len);
+  ptr += vhost_len->len;
+  if (vhost_len) free(vhost_len);
+  if (host_len == -1) return -1;
+  if (ptr + host_len >= buf + buflen) {
+    // claimed hostname longer than packet
+    return -1;
+  }
+  char *str_hostname = strndup(ptr, host_len);
+  if (!str_hostname) {
+    L_PERROR();
+    L_ERR("Read hostname failed.");
+  }
+  ptr += host_len;
+  uint16_t port;
+  memcpy(&port, ptr, 2);
+  port = ntohs(port);
+  L_DEBUGF("client thinks it's connecting to: %s:%d", str_hostname, port);
+  free(str_hostname);
+  ptr += 2;
+  varint_t *vnext_state = varint_from_buf(ptr, buflen - (ptr - buf));
+  uint64_t next_state = varint_to_int64(vnext_state);
+  L_DEBUGF(
+      "Next State: %s",
+      (next_state == 1 ? "Status" : (next_state == 2 ? "Login" : "WTF?!")));
+  if (vnext_state) free(vnext_state);
+  return next_state;
 }
 
 void fsm(conn_info_t *conn, int epollfd) {
@@ -81,17 +127,38 @@ void fsm(conn_info_t *conn, int epollfd) {
       if (rbuf.ret < 1) return;
       conn->current_buf_len += rbuf.ret;
       if (conn->current_buf_len >= conn->target_packet_len) {
-        _fsm_epollout_enable(conn, epollfd);
-        conn->state = 1;
         // check nextstate here
+        varint_t *v_pktid = varint_from_buf(conn->buf, conn->current_buf_len);
+        int64_t pktid = varint_to_int64(v_pktid);
+        if (v_pktid) free(v_pktid);
+        switch (pktid) {
+          case 0: {
+            L_DEBUGF("Received handshake from fd=%d", conn->connfd);
+            int64_t next_state =
+                _fsm_parse_handshake(conn->buf, conn->current_buf_len);
+            if (next_state != 1 && next_state != 2)
+              _fsm_epoll_remove(conn, epollfd);
+            else {
+              conn->state = next_state;
+              _fsm_epollout_enable(conn, epollfd);
+            }
+          } break;
+          case 1: {
+          } break;
+          default: {
+            L_ERRF("Unknown Packet ID received: 0x%02lx", pktid);
+            _fsm_epoll_remove(conn, epollfd);
+          } break;
+        }
       }
     } break;
     case 1: {
-      // response server list ping here
-
+      // respond server list ping here
+      _fsm_epoll_remove(conn, epollfd);
     } break;
     case 2: {
       // handle login request here
+      _fsm_epoll_remove(conn, epollfd);
     } break;
   }
 }

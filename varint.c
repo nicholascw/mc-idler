@@ -6,6 +6,7 @@
 #include "log.h"
 
 int64_t varint_to_int64(const varint_t *in) {
+  if (!in) return -1;
   int64_t out = 0;
   for (int i = 0; i < in->len; i++)
     out = out | ((0x7f & in->data[i]) << (i * 7));
@@ -33,6 +34,7 @@ varint_t *int64_to_varint(const int64_t in) {
 }
 
 varint_t *varint_from_buf(const char *buf, const ssize_t len) {
+  if (len <= 0) return NULL;
   uint8_t counter = 0;
   while (((*(buf + counter)) & 0x80) &&
          (counter < (len - 1 < 10 ? len - 1 : 10)))
