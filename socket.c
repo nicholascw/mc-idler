@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -106,8 +107,12 @@ void socket_epoll_loop(int listen_fd, void (*fsm)(conn_info_t *, int)) {
                             ? listen_fd
                             : ((conn_info_t *)events[i].data.ptr)->connfd;
         if (events[i].events & EPOLL_ERRS) {
-          L_ERRF("Epoll error event 0x%x occured on fd=%d, closing...",
-                 events[i].events, this_evfd);
+          if (events[i].events & EPOLLRDHUP) {
+            L_INFOF("fd=%d remote hang up, closing...", this_evfd);
+          } else {
+            L_ERRF("Epoll error event 0x%x occured on fd=%d, closing...",
+                   events[i].events, this_evfd);
+          }
           free(events[i].data.ptr);
           close(this_evfd);
           epoll_ctl(epollfd, EPOLL_CTL_DEL, this_evfd, NULL);
@@ -160,6 +165,15 @@ void socket_epoll_loop(int listen_fd, void (*fsm)(conn_info_t *, int)) {
           // existing connection
           conn_info_t *this_conn = events[i].data.ptr;
           if (events[i].events & (EPOLLIN | EPOLLOUT)) {
+            if (events[i].events & EPOLLIN) {
+              int count;
+              if (ioctl(this_evfd, FIONREAD, &count) < 0) {
+                L_PERROR();
+              } else {
+                L_DEBUGF("fd=%d has %d bytes available for read.", this_evfd,
+                         count);
+              }
+            }
             (*fsm)(this_conn, epollfd);
           } else {
             L_DEBUG("Unknown epoll events returned.");

@@ -261,7 +261,7 @@ void fsm(conn_info_t *conn, int epollfd) {
     case 2: {
       L_DEBUG("State 2 entered.");
       // handle login request here
-      _fsm_epoll_remove(conn, epollfd);
+      // _fsm_epoll_remove(conn, epollfd);
     } break;
   }
 }
