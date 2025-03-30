@@ -48,60 +48,59 @@
  * For primitive data types (int, float, etc.), strings and
  * pointers. Returns the result of given expression.
  */
-#define dbg(expr) \
-  _Generic((expr),                                    \
-             char: dbg_char,                            \
-             signed char: dbg_schar,                    \
-             unsigned char: dbg_uchar,                  \
-             short: dbg_short,                          \
-             unsigned short: dbg_ushort,                \
-             int: dbg_int,                              \
-             unsigned int: dbg_uint,                    \
-             long: dbg_long,                            \
-             unsigned long: dbg_ulong,                  \
-             long long: dbg_llong,                      \
-             unsigned long long: dbg_ullong,            \
-             float: dbg_float,                          \
-             double: dbg_double,                        \
-             bool: dbg_bool,                            \
-             char *: dbg_char_p,                        \
-             const char *: dbg_const_char_p,            \
-             signed char *: dbg_schar_p,                \
-             const signed char *: dbg_const_schar_p,    \
-             unsigned char *: dbg_uchar_p,              \
-             const unsigned char *: dbg_const_uchar_p,  \
-             default: dbg_pointer)                      \
-    (__FILE__, __LINE__, __func__, #expr, expr)
+#define dbg(expr)                               \
+  _Generic((expr),                              \
+      char: dbg_char,                           \
+      signed char: dbg_schar,                   \
+      unsigned char: dbg_uchar,                 \
+      short: dbg_short,                         \
+      unsigned short: dbg_ushort,               \
+      int: dbg_int,                             \
+      unsigned int: dbg_uint,                   \
+      long: dbg_long,                           \
+      unsigned long: dbg_ulong,                 \
+      long long: dbg_llong,                     \
+      unsigned long long: dbg_ullong,           \
+      float: dbg_float,                         \
+      double: dbg_double,                       \
+      bool: dbg_bool,                           \
+      char *: dbg_char_p,                       \
+      const char *: dbg_const_char_p,           \
+      signed char *: dbg_schar_p,               \
+      const signed char *: dbg_const_schar_p,   \
+      unsigned char *: dbg_uchar_p,             \
+      const unsigned char *: dbg_const_uchar_p, \
+      default: dbg_pointer)(__FILE__, __LINE__, __func__, #expr, expr)
 
 /**
  * For array of primitive data types. Returns the result of given
  * expression.
  */
-#define dbga(expr, length) \
-  _Generic((expr),                                            \
-             short *: dbg_short_p,                              \
-             const short *: dbg_const_short_p,                  \
-             unsigned short *: dbg_ushort_p,                    \
-             const unsigned short *: dbg_const_ushort_p,        \
-             int *: dbg_int_p,                                  \
-             const int *: dbg_const_int_p,                      \
-             unsigned int *: dbg_uint_p,                        \
-             const unsigned int *: dbg_const_uint_p,            \
-             long *: dbg_long_p,                                \
-             const long *: dbg_const_long_p,                    \
-             unsigned long *: dbg_ulong_p,                      \
-             const unsigned long *: dbg_const_ulong_p,          \
-             long long *: dbg_llong_p,                          \
-             const long long *: dbg_const_llong_p,              \
-             unsigned long long *: dbg_ullong_p,                \
-             const unsigned long long *: dbg_const_ullong_p,    \
-             float *: dbg_float_p,                              \
-             const float *: dbg_const_float_p,                  \
-             double *: dbg_double_p,                            \
-             const double *: dbg_const_double_p,                \
-             bool *: dbg_bool_p,                                \
-             const bool *: dbg_const_bool_p)                    \
-    (__FILE__, __LINE__, __func__, #expr, expr, length)
+#define dbga(expr, length)                                                 \
+  _Generic((expr),                                                         \
+      short *: dbg_short_p,                                                \
+      const short *: dbg_const_short_p,                                    \
+      unsigned short *: dbg_ushort_p,                                      \
+      const unsigned short *: dbg_const_ushort_p,                          \
+      int *: dbg_int_p,                                                    \
+      const int *: dbg_const_int_p,                                        \
+      unsigned int *: dbg_uint_p,                                          \
+      const unsigned int *: dbg_const_uint_p,                              \
+      long *: dbg_long_p,                                                  \
+      const long *: dbg_const_long_p,                                      \
+      unsigned long *: dbg_ulong_p,                                        \
+      const unsigned long *: dbg_const_ulong_p,                            \
+      long long *: dbg_llong_p,                                            \
+      const long long *: dbg_const_llong_p,                                \
+      unsigned long long *: dbg_ullong_p,                                  \
+      const unsigned long long *: dbg_const_ullong_p,                      \
+      float *: dbg_float_p,                                                \
+      const float *: dbg_const_float_p,                                    \
+      double *: dbg_double_p,                                              \
+      const double *: dbg_const_double_p,                                  \
+      bool *: dbg_bool_p,                                                  \
+      const bool *: dbg_const_bool_p)(__FILE__, __LINE__, __func__, #expr, \
+                                      expr, length)
 
 /**
  * To force boolean true/false output. Returns the result of given
@@ -113,36 +112,36 @@
  * Hexdump of given size at given address. Returns the result of given
  * expression.
  */
-#define dbgh(expr, size) \
-  _Generic((expr),                                                    \
-             char *: dbg_hexdump_char_p,                                \
-             const char *: dbg_hexdump_const_char_p,                    \
-             signed char *: dbg_hexdump_schar_p,                        \
-             const signed char *: dbg_hexdump_const_schar_p,            \
-             unsigned char *: dbg_hexdump_uchar_p,                      \
-             const unsigned char *: dbg_hexdump_const_uchar_p,          \
-             short *: dbg_hexdump_short_p,                              \
-             const short *: dbg_hexdump_const_short_p,                  \
-             unsigned short *: dbg_hexdump_ushort_p,                    \
-             const unsigned short *: dbg_hexdump_const_ushort_p,        \
-             int *: dbg_hexdump_int_p,                                  \
-             const int *: dbg_hexdump_const_int_p,                      \
-             unsigned int *: dbg_hexdump_uint_p,                        \
-             const unsigned int *: dbg_hexdump_const_uint_p,            \
-             long *: dbg_hexdump_long_p,                                \
-             const long *: dbg_hexdump_const_long_p,                    \
-             unsigned long *: dbg_hexdump_ulong_p,                      \
-             const unsigned long *: dbg_hexdump_const_ulong_p,          \
-             long long *: dbg_hexdump_llong_p,                          \
-             const long long *: dbg_hexdump_const_llong_p,              \
-             unsigned long long *: dbg_hexdump_ullong_p,                \
-             const unsigned long long *: dbg_hexdump_const_ullong_p,    \
-             float *: dbg_hexdump_float_p,                              \
-             const float *: dbg_hexdump_const_float_p,                  \
-             double *: dbg_hexdump_double_p,                            \
-             const double *: dbg_hexdump_const_double_p,                \
-             default: dbg_hexdump_const_p)                              \
-    (__FILE__, __LINE__, __func__, #expr, expr, size)
+#define dbgh(expr, size)                                                       \
+  _Generic((expr),                                                             \
+      char *: dbg_hexdump_char_p,                                              \
+      const char *: dbg_hexdump_const_char_p,                                  \
+      signed char *: dbg_hexdump_schar_p,                                      \
+      const signed char *: dbg_hexdump_const_schar_p,                          \
+      unsigned char *: dbg_hexdump_uchar_p,                                    \
+      const unsigned char *: dbg_hexdump_const_uchar_p,                        \
+      short *: dbg_hexdump_short_p,                                            \
+      const short *: dbg_hexdump_const_short_p,                                \
+      unsigned short *: dbg_hexdump_ushort_p,                                  \
+      const unsigned short *: dbg_hexdump_const_ushort_p,                      \
+      int *: dbg_hexdump_int_p,                                                \
+      const int *: dbg_hexdump_const_int_p,                                    \
+      unsigned int *: dbg_hexdump_uint_p,                                      \
+      const unsigned int *: dbg_hexdump_const_uint_p,                          \
+      long *: dbg_hexdump_long_p,                                              \
+      const long *: dbg_hexdump_const_long_p,                                  \
+      unsigned long *: dbg_hexdump_ulong_p,                                    \
+      const unsigned long *: dbg_hexdump_const_ulong_p,                        \
+      long long *: dbg_hexdump_llong_p,                                        \
+      const long long *: dbg_hexdump_const_llong_p,                            \
+      unsigned long long *: dbg_hexdump_ullong_p,                              \
+      const unsigned long long *: dbg_hexdump_const_ullong_p,                  \
+      float *: dbg_hexdump_float_p,                                            \
+      const float *: dbg_hexdump_const_float_p,                                \
+      double *: dbg_hexdump_double_p,                                          \
+      const double *: dbg_hexdump_const_double_p,                              \
+      default: dbg_hexdump_const_p)(__FILE__, __LINE__, __func__, #expr, expr, \
+                                    size)
 
 /**
  * For negative error codes. Returns the result of given expression.
